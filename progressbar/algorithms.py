@@ -38,3 +38,12 @@ class DoubleExponentialMovingAverage(SmoothingAlgorithm):
         self.alpha = alpha
         self.ema1 = 0
         self.ema2 = 0
+
+    def update(self, new_value: float, elapsed: timedelta) -> float:
+        """Updates the algorithm with a new value and returns the smoothed
+        value.
+        """
+        self.ema1 = self.alpha * new_value + (1 - self.alpha) * self.ema1
+        self.ema2 = self.alpha * self.ema1 + (1 - self.alpha) * self.ema2
+        dema = 2 * self.ema1 - self.ema2
+        return dema
