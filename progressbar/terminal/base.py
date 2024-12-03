@@ -109,7 +109,14 @@ class WindowsColors(enum.Enum):
         >>> WindowsColors.from_rgb((128, 0, 128))
         <WindowsColors.MAGENTA: (128, 0, 128)>
         """
-        pass
+        min_distance = float('inf')
+        closest_color = None
+        for color in WindowsColors:
+            distance = sum((a - b) ** 2 for a, b in zip(rgb, color.value))
+            if distance < min_distance:
+                min_distance = distance
+                closest_color = color
+        return closest_color
 
 class WindowsColor:
     """
@@ -139,7 +146,7 @@ class RGB(collections.namedtuple('RGB', ['red', 'green', 'blue'])):
         Convert an RGB color (0-255 per channel) to the closest color in the
         Windows 16 color scheme.
         """
-        pass
+        return WindowsColors.from_rgb((self.red, self.green, self.blue))
 
 class HSL(collections.namedtuple('HSL', ['hue', 'saturation', 'lightness'])):
     """
@@ -154,9 +161,27 @@ class HSL(collections.namedtuple('HSL', ['hue', 'saturation', 'lightness'])):
     @classmethod
     def from_rgb(cls, rgb: RGB) -> HSL:
         """
-        Convert a 0-255 RGB color to a 0-255 HLS color.
+        Convert a 0-255 RGB color to a 0-360 (hue) and 0-100 (saturation, lightness) HSL color.
         """
-        pass
+        r, g, b = rgb.red / 255.0, rgb.green / 255.0, rgb.blue / 255.0
+        max_val = max(r, g, b)
+        min_val = min(r, g, b)
+        l = (max_val + min_val) / 2
+
+        if max_val == min_val:
+            h = s = 0  # achromatic
+        else:
+            d = max_val - min_val
+            s = d / (2 - max_val - min_val) if l > 0.5 else d / (max_val + min_val)
+            if max_val == r:
+                h = (g - b) / d + (6 if g < b else 0)
+            elif max_val == g:
+                h = (b - r) / d + 2
+            else:
+                h = (r - g) / d + 4
+            h /= 6
+
+        return cls(int(h * 360), int(s * 100), int(l * 100))
 
 class ColorBase(abc.ABC):
     pass
@@ -207,7 +232,19 @@ class ColorGradient(ColorBase):
 
     def get_color(self, value: float) -> Color:
         """Map a value from 0 to 1 to a color."""
-        pass
+        if value <= 0:
+            return self.colors[0]
+        if value >= 1:
+            return self.colors[-1]
+
+        segment_size = 1.0 / (len(self.colors) - 1)
+        segment = int(value / segment_size)
+        t = (value - segment * segment_size) / segment_size
+
+        color1 = self.colors[segment]
+        color2 = self.colors[segment + 1]
+
+        return self.interpolate(color1, color2, t)
 OptionalColor = types.Union[Color, ColorGradient, None]
 
 def apply_colors(text: str, percentage: float | None=None, *, fg: OptionalColor=None, bg: OptionalColor=None, fg_none: Color | None=None, bg_none: Color | None=None, **kwargs: types.Any) -> str:
@@ -217,7 +254,21 @@ def apply_colors(text: str, percentage: float | None=None, *, fg: OptionalColor=
     Otherwise, the `fg` and `bg` colors will be used. If the colors are
     gradients, the color will be interpolated depending on the percentage.
     """
-    pass
+    if percentage is None:
+        fg_color = fg_none
+        bg_color = bg_none
+    else:
+        fg_color = fg(percentage) if isinstance(fg, ColorGradient) else fg
+        bg_color = bg(percentage) if isinstance(bg, ColorGradient) else bg
+
+    result = text
+
+    if fg_color:
+        result = fg_color.fg(result)
+    if bg_color:
+        result = bg_color.bg(result)
+
+    return result
 
 class DummyColor:
 
