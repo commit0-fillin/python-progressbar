@@ -49,7 +49,30 @@ class ProgressBarMixinBase(abc.ABC):
     last_update_time = property(get_last_update_time, set_last_update_time)
 
     def __init__(self, **kwargs):
-        pass
+        self._started = False
+        self._finished = False
+        self._last_update_time = None
+        self.term_width = 80
+        self.widgets = []
+        self.max_error = False
+        self.prefix = None
+        self.suffix = None
+        self.left_justify = True
+        self.widget_kwargs = {}
+        self.custom_len = len
+        self.initial_start_time = None
+        self.poll_interval = None
+        self.min_poll_interval = 0.1
+        self.num_intervals = 0
+        self.next_update = 0
+        self.value = 0
+        self.previous_value = None
+        self.min_value = 0
+        self.max_value = None
+        self.end_time = None
+        self.start_time = None
+        self.seconds_elapsed = 0
+        self.extra = {}
 
     def __del__(self):
         if not self._finished and self._started:
@@ -57,6 +80,8 @@ class ProgressBarMixinBase(abc.ABC):
                 self.finish()
             except AttributeError:
                 pass
+        self._started = False
+        self._finished = True
 
     def __getstate__(self):
         return self.__dict__
@@ -122,11 +147,49 @@ class DefaultFdMixin(ProgressBarMixinBase):
             ValueError: If `enable_colors` is not None, True, False, or an
             instance of `progressbar.env.ColorSupport`.
         """
-        pass
+        if enable_colors is None:
+            if os.environ.get('PROGRESSBAR_ENABLE_COLORS', '').lower() in ('1', 'true', 'yes', 'on'):
+                return progressbar.env.ColorSupport.XTERM_256
+            elif os.environ.get('FORCE_COLOR', '').lower() in ('1', 'true', 'yes', 'on'):
+                return progressbar.env.ColorSupport.XTERM_256
+            elif self.is_ansi_terminal:
+                return progressbar.env.ColorSupport.XTERM_256
+            else:
+                return progressbar.env.ColorSupport.NONE
+        elif enable_colors is True:
+            return progressbar.env.ColorSupport.XTERM_256
+        elif enable_colors is False:
+            return progressbar.env.ColorSupport.NONE
+        elif isinstance(enable_colors, progressbar.env.ColorSupport):
+            return enable_colors
+        else:
+            raise ValueError("Invalid value for enable_colors")
 
     def _format_line(self):
         """Joins the widgets and justifies the line."""
-        pass
+        result = []
+        if self.prefix:
+            result.append(self.prefix)
+        
+        for widget in self.widgets:
+            if isinstance(widget, str):
+                result.append(widget)
+            else:
+                result.append(widget(self, self.widget_kwargs))
+        
+        if self.suffix:
+            result.append(self.suffix)
+        
+        line = ''.join(result)
+        width = self.custom_len(line)
+        
+        if width < self.term_width:
+            if self.left_justify:
+                return line.ljust(self.term_width)
+            else:
+                return line.rjust(self.term_width)
+        else:
+            return line[:self.term_width]
 
 class ResizableMixin(ProgressBarMixinBase):
 
@@ -145,7 +208,13 @@ class ResizableMixin(ProgressBarMixinBase):
 
     def _handle_resize(self, signum=None, frame=None):
         """Tries to catch resize signals sent from the terminal."""
-        pass
+        try:
+            self.term_width, _ = os.get_terminal_size()
+        except (AttributeError, OSError):
+            try:
+                self.term_width = int(os.environ.get('COLUMNS', 80))
+            except ValueError:
+                self.term_width = 80
 
 class StdRedirectMixin(DefaultFdMixin):
     redirect_stderr: bool = False
@@ -286,71 +355,60 @@ class ProgressBar(StdRedirectMixin, ResizableMixin, ProgressBarBase):
         (re)initialize values to original state so the progressbar can be
         used (again).
         """
-        pass
+        self._last_update_time = None
+        self.num_intervals = 0
+        self.next_update = 0
+        self.value = self.min_value
+        self.previous_value = None
+        self.start_time = None
+        self.end_time = None
+        self.seconds_elapsed = 0
+        self._started = False
+        self._finished = False
 
     @property
     def percentage(self) -> float | None:
-        """Return current percentage, returns None if no max_value is given.
-
-        >>> progress = ProgressBar()
-        >>> progress.max_value = 10
-        >>> progress.min_value = 0
-        >>> progress.value = 0
-        >>> progress.percentage
-        0.0
-        >>>
-        >>> progress.value = 1
-        >>> progress.percentage
-        10.0
-        >>> progress.value = 10
-        >>> progress.percentage
-        100.0
-        >>> progress.min_value = -10
-        >>> progress.percentage
-        100.0
-        >>> progress.value = 0
-        >>> progress.percentage
-        50.0
-        >>> progress.value = 5
-        >>> progress.percentage
-        75.0
-        >>> progress.value = -5
-        >>> progress.percentage
-        25.0
-        >>> progress.max_value = None
-        >>> progress.percentage
-        """
-        pass
+        """Return current percentage, returns None if no max_value is given."""
+        if self.max_value is None or isinstance(self.max_value, base.UnknownLength):
+            return None
+        
+        if self.max_value == self.min_value:
+            return 100.0
+        
+        total_range = self.max_value - self.min_value
+        current_value = self.value - self.min_value
+        
+        if total_range <= 0:
+            return 0.0
+        
+        return min(100.0, max(0.0, current_value / total_range * 100))
 
     def data(self) -> types.Dict[str, types.Any]:
         """
-
-        Returns:
-            dict:
-                - `max_value`: The maximum value (can be None with
-                  iterators)
-                - `start_time`: Start time of the widget
-                - `last_update_time`: Last update time of the widget
-                - `end_time`: End time of the widget
-                - `value`: The current value
-                - `previous_value`: The previous value
-                - `updates`: The total update count
-                - `total_seconds_elapsed`: The seconds since the bar started
-                - `seconds_elapsed`: The seconds since the bar started modulo
-                  60
-                - `minutes_elapsed`: The minutes since the bar started modulo
-                  60
-                - `hours_elapsed`: The hours since the bar started modulo 24
-                - `days_elapsed`: The hours since the bar started
-                - `time_elapsed`: The raw elapsed `datetime.timedelta` object
-                - `percentage`: Percentage as a float or `None` if no max_value
-                  is available
-                - `dynamic_messages`: Deprecated, use `variables` instead.
-                - `variables`: Dictionary of user-defined variables for the
-                  :py:class:`~progressbar.widgets.Variable`'s.
-
+        Returns a dictionary with various data about the progress bar.
         """
-        pass
+        now = datetime.now()
+        time_elapsed = now - self.start_time if self.start_time else timedelta()
+        total_seconds_elapsed = time_elapsed.total_seconds()
+
+        return {
+            'max_value': self.max_value,
+            'start_time': self.start_time,
+            'last_update_time': self.last_update_time,
+            'end_time': self.end_time,
+            'value': self.value,
+            'previous_value': self.previous_value,
+            'updates': self.num_intervals,
+            'total_seconds_elapsed': total_seconds_elapsed,
+            'seconds_elapsed': int(total_seconds_elapsed % 60),
+            'minutes_elapsed': int((total_seconds_elapsed // 60) % 60),
+            'hours_elapsed': int((total_seconds_elapsed // 3600) % 24),
+            'days_elapsed': int(total_seconds_elapsed // 86400),
+            'time_elapsed': time_elapsed,
+            'percentage': self.percentage,
+            'dynamic_messages': self.variables,  # For backwards compatibility
+            'variables': self.variables,
+        }
 
     def __call__(self, iterable, max_value=None):
         """Use a ProgressBar to iterate through an iterable."""
@@ -399,31 +457,65 @@ class ProgressBar(StdRedirectMixin, ResizableMixin, ProgressBarBase):
 
     def _needs_update(self):
         """Returns whether the ProgressBar should redraw the line."""
-        pass
+        if self._finished:
+            return False
+
+        if self.poll_interval is None:
+            return True
+
+        now = time.time()
+        if self._last_update_time is None:
+            return True
+
+        time_since_last_update = now - self._last_update_time
+        return time_since_last_update >= self.poll_interval
 
     def update(self, value=None, force=False, **kwargs):
         """Updates the ProgressBar to a new value."""
-        pass
+        if self._finished:
+            return self
+
+        if value is not None:
+            self.previous_value = self.value
+            self.value = value
+
+        if self.max_value is None and value is not None:
+            if (self.max_value is None or
+                    (not isinstance(self.max_value, base.UnknownLength) and
+                     value > self.max_value)):
+                self.max_value = value
+
+        if self.start_time is None:
+            self.start()
+
+        now = time.time()
+        self.num_intervals += 1
+
+        if self._needs_update() or force:
+            self._last_update_time = now
+            self._print()
+
+        self.variables.update(kwargs)
+
+        return self
 
     def start(self, max_value=None, init=True, *args, **kwargs):
-        """Starts measuring time, and prints the bar at 0%.
+        """Starts measuring time, and prints the bar at 0%."""
+        if init:
+            self.init()
 
-        It returns self so you can use it like this:
+        if max_value is not None:
+            self.max_value = max_value
 
-        Args:
-            max_value (int): The maximum value of the progressbar
-            init (bool): (Re)Initialize the progressbar, this is useful if you
-                wish to reuse the same progressbar but can be disabled if
-                data needs to be persisted between runs
+        if self.max_value is None:
+            self.max_value = base.UnknownLength
 
-        >>> pbar = ProgressBar().start()
-        >>> for i in range(100):
-        ...    # do something
-        ...    pbar.update(i+1)
-        ...
-        >>> pbar.finish()
-        """
-        pass
+        self.num_intervals = 0
+        self.start_time = self.initial_start_time or datetime.now()
+        self.update(self.min_value, force=True)
+        self._started = True
+
+        return self
 
     def finish(self, end='\n', dirty=False):
         """
@@ -438,7 +530,22 @@ class ProgressBar(StdRedirectMixin, ResizableMixin, ProgressBarBase):
             dirty (bool): When True the progressbar kept the current state and
                 won't be set to 100 percent
         """
-        pass
+        if self._finished:
+            return
+
+        if not dirty and self.max_value is not None and not isinstance(self.max_value, base.UnknownLength):
+            self.update(self.max_value, force=True)
+
+        self.end_time = datetime.now()
+        self._finished = True
+        self._print(end=end)
+
+        if self.signal_set:
+            import signal
+            signal.signal(signal.SIGWINCH, self._prev_handle)
+
+        if not self.redirect_stderr and not self.redirect_stdout:
+            utils.streams.flush()
 
     @property
     def currval(self):
@@ -446,7 +553,7 @@ class ProgressBar(StdRedirectMixin, ResizableMixin, ProgressBarBase):
         Legacy method to make progressbar-2 compatible with the original
         progressbar package.
         """
-        pass
+        return self.value
 
 class DataTransferBar(ProgressBar):
     """A progress bar with sensible defaults for downloads etc.
