@@ -30,14 +30,25 @@ def create_wrapper(wrapper):
     >>> print(create_wrapper(('a', 'b')))
     a{}b
     """
-    pass
+    if not wrapper:
+        return None
+    elif isinstance(wrapper, tuple):
+        return '{}{}{}' if len(wrapper) == 2 else wrapper[1]
+    else:
+        return wrapper
 
 def wrapper(function, wrapper_):
     """Wrap the output of a function in a template string or a tuple with
     begin/end strings.
-
     """
-    pass
+    wrapper_ = create_wrapper(wrapper_)
+    
+    @functools.wraps(function)
+    def wrap(*args, **kwargs):
+        result = function(*args, **kwargs)
+        return wrapper_.format(result) if wrapper_ else result
+
+    return wrap
 
 class FormatWidgetMixin(abc.ABC):
     """Mixin to format widgets using a formatstring.
@@ -297,7 +308,13 @@ class ETA(Timer):
 
     def _calculate_eta(self, progress: ProgressBarMixinBase, data: Data, value, elapsed):
         """Updates the widget to show the ETA or total time when finished."""
-        pass
+        if elapsed:
+            if progress.max_value is not None and value:
+                prediction = elapsed * progress.max_value / value - elapsed
+                if prediction > 365 * 24 * 60 * 60:  # 1 year
+                    return None
+                return prediction
+        return None
 
     def __call__(self, progress: ProgressBarMixinBase, data: Data, value=None, elapsed=None):
         """Updates the widget to show the ETA or total time when finished."""
