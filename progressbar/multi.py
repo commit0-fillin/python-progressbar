@@ -101,7 +101,41 @@ class MultiBar(typing.Dict[str, bar.ProgressBar]):
 
     def render(self, flush: bool=True, force: bool=False):
         """Render the multibar to the given stream."""
-        pass
+        with self._print_lock:
+            now = time.time()
+            output = []
+            bars = sorted(self.values(), key=self.sort_keyfunc, reverse=self.sort_reverse)
+
+            for bar in bars:
+                if bar._finished and self.remove_finished is not None:
+                    if bar not in self._finished_at:
+                        self._finished_at[bar] = now
+                    if now - self._finished_at[bar] > self.remove_finished:
+                        continue
+
+                if bar not in self._labeled and self.show_initial and self.initial_format:
+                    output.append(self.initial_format.format(label=bar.label))
+                elif bar._finished and self.show_finished and self.finished_format:
+                    output.append(self.finished_format.format(label=bar.label))
+                else:
+                    line = bar._format_line()
+                    if self.prepend_label:
+                        line = self.label_format.format(label=bar.label) + line
+                    if self.append_label:
+                        line += self.label_format.format(label=bar.label)
+                    output.append(line)
+                self._labeled.add(bar)
+
+            if output != self._previous_output or force:
+                self._buffer.seek(0)
+                self._buffer.truncate()
+                for line in output:
+                    self._buffer.write(line + '\n')
+                if flush:
+                    self._buffer.flush()
+                self._previous_output = output
+
+            return self._buffer.getvalue()
 
     def print(self, *args, end='\n', offset=None, flush=True, clear=True, **kwargs):
         """
@@ -115,14 +149,42 @@ class MultiBar(typing.Dict[str, bar.ProgressBar]):
             clear: If True, the line will be cleared before printing.
             **kwargs: Additional keyword arguments to pass to print
         """
-        pass
+        with self._print_lock:
+            if offset is None:
+                offset = len(self)
+
+            if clear:
+                self.fd.write('\033[2K')  # Clear the current line
+
+            self.fd.write('\033[{}A'.format(offset))  # Move cursor up
+            print(*args, end=end, file=self.fd, flush=flush, **kwargs)
+            self.fd.write('\033[{}B'.format(offset))  # Move cursor back down
+
+            if flush:
+                self.fd.flush()
 
     def run(self, join=True):
         """
         Start the multibar render loop and run the progressbars until they
         have force _thread_finished.
         """
-        pass
+        def render_loop():
+            while not self._thread_finished.is_set():
+                self.render()
+                time.sleep(self.update_interval)
+            self._thread_closed.set()
+
+        self._thread = threading.Thread(target=render_loop)
+        self._thread.daemon = True
+        self._thread.start()
+
+        if join:
+            try:
+                while self._thread.is_alive():
+                    self._thread.join(1)
+            except KeyboardInterrupt:
+                self._thread_finished.set()
+                self._thread_closed.wait()
 
     def __enter__(self):
         self.start()
