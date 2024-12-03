@@ -48,7 +48,16 @@ def deltas_to_seconds(*deltas, default: types.Optional[types.Type[ValueError]]=V
     >>> deltas_to_seconds(default=0.0)
     0.0
     """
-    pass
+    for delta in deltas:
+        if delta is None:
+            continue
+        if isinstance(delta, datetime.timedelta):
+            return delta.total_seconds()
+        if isinstance(delta, (int, float)):
+            return float(delta)
+    if isinstance(default, type) and issubclass(default, Exception):
+        raise default("No valid deltas passed to `deltas_to_seconds`")
+    return default
 
 def no_color(value: StringT) -> StringT:
     """
@@ -65,7 +74,10 @@ def no_color(value: StringT) -> StringT:
     ...
     TypeError: `value` must be a string or bytes, got 123
     """
-    pass
+    if isinstance(value, (str, bytes)):
+        return re.sub(b'\x1b\\[[;\\d]*[A-Za-z]' if isinstance(value, bytes) else '\x1b\\[[;\\d]*[A-Za-z]', '', value)
+    else:
+        raise TypeError(f"`value` must be a string or bytes, got {type(value).__name__}")
 
 def len_color(value: types.StringTypes) -> int:
     """
@@ -78,7 +90,7 @@ def len_color(value: types.StringTypes) -> int:
     >>> len_color('\x1b[1234]abc')
     3
     """
-    pass
+    return len(no_color(value))
 
 class WrappingIO:
     buffer: io.StringIO
