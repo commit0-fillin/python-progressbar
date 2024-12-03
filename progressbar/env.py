@@ -14,7 +14,17 @@ def env_flag(name, default=None):
     If the environment variable is not defined, or has an unknown value,
     returns `default`
     """
-    pass
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    
+    value = value.lower()
+    if value in ('y', 'yes', '1', 'true', 'on'):
+        return True
+    elif value in ('n', 'no', '0', 'false', 'off'):
+        return False
+    else:
+        return default
 
 class ColorSupport(enum.IntEnum):
     """Color support for the terminal."""
@@ -39,7 +49,24 @@ class ColorSupport(enum.IntEnum):
         Note that the highest available value will be used! Having
         `COLORTERM=truecolor` will override `TERM=xterm-256color`.
         """
-        pass
+        if (os.environ.get('JUPYTER_COLUMNS') or
+            os.environ.get('JUPYTER_LINES') or
+            os.environ.get('JPY_PARENT_PID')):
+            return cls.XTERM_TRUECOLOR
+
+        color_term = os.environ.get('COLORTERM', '').lower()
+        term = os.environ.get('TERM', '').lower()
+
+        if '24bit' in color_term or 'truecolor' in color_term:
+            return cls.XTERM_TRUECOLOR
+        elif '256' in term or '256' in color_term:
+            return cls.XTERM_256
+        elif 'xterm' in term or 'xterm' in color_term:
+            return cls.XTERM
+        elif os.name == 'nt':
+            return cls.WINDOWS
+        else:
+            return cls.NONE
 if os.name == 'nt':
     pass
 JUPYTER = bool(os.environ.get('JUPYTER_COLUMNS') or os.environ.get('JUPYTER_LINES') or os.environ.get('JPY_PARENT_PID'))
