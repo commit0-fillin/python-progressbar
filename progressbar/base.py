@@ -8,7 +8,7 @@ class FalseMeta(type):
 
     @classmethod
     def __cmp__(cls, other):
-        return -1
+        return -1  # Always return -1 to indicate that this class is "less than" any other object
     __nonzero__ = __bool__
 
 class UnknownLength(metaclass=FalseMeta):
