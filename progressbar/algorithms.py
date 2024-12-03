@@ -13,7 +13,8 @@ class SmoothingAlgorithm(abc.ABC):
         """Updates the algorithm with a new value and returns the smoothed
         value.
         """
-        pass
+        self.value = self.alpha * new_value + (1 - self.alpha) * self.value
+        return self.value
 
 class ExponentialMovingAverage(SmoothingAlgorithm):
     """
